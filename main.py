@@ -8,18 +8,46 @@ from scipy import ndimage as nd
 
 import skimage
 from skimage.metrics import peak_signal_noise_ratio
+from skimage import io
+from skimage.color import rgb2grey
+
+
 
 #from SSIM_PIL import compare_ssim
 
-img = Image.open("gorilla.jpg")
+img = io.imread("gorilla.jpg")
+greyimg = io.imread("gorilla.jpg", as_gray=True)
 
 #print ((img.histogram()))  if detecting what kind of the image has asked.
 
 #pix_val = list(img.getdata())
 #print(pix_val) #visits each pixel
 
-iar = np.array(img)
+#iar = np.array(img)
 #print(iar)
+
+
+
+def convolve2d(image, kernel):
+    # This function which takes an image and a kernel
+    # and returns the convolution of them
+    # Args:
+    #   image: a numpy array of size [image_height, image_width].
+    #   kernel: a numpy array of size [kernel_height, kernel_width].
+    # Returns:
+    #   a numpy array of size [image_height, image_width] (convolution output).
+
+    kernel = np.flipud(np.fliplr(kernel))  # Flip the kernel
+    output = np.zeros_like(image)  # convolution output
+    # Add zero padding to the input image
+    image_padded = np.zeros((image.shape[0] + 2, image.shape[1] + 2))
+    image_padded[1:-1, 1:-1] = image
+    for x in range(image.shape[1]):  # Loop over every pixel of the image
+        for y in range(image.shape[0]):
+            # element-wise multiplication of the kernel and the image
+            output[y, x] = (kernel * image_padded[y:y + 3, x:x + 3]).sum()
+    return output
+
 
 def noise_generator(noise_type, image):
     """
@@ -157,9 +185,13 @@ plotnoise(iar, None, r,c,8)
 plt.show()
 '''
 
-gaussian_img = skimage.util.random_noise(iar, mode="gaussian")
+gaussian_greyimg = skimage.util.random_noise(greyimg, mode="gaussian")
+plt.imsave("gaussian_grey.jpg",gaussian_greyimg)
+psnrNoise = psnr(greyimg, gaussian_greyimg)
+
+gaussian_img = skimage.util.random_noise(img, mode="gaussian")
 plt.imsave("gaussian.jpg",gaussian_img)
-psnrNoise = psnr(iar, gaussian_img)
+psnrNoise = psnr(img, gaussian_img)
 
 gaussian_filter = nd.gaussian_filter(gaussian_img, sigma=3)   #filters works as, it averages the values in image and replaces all the pixel with it.Gaussian filter does not preserve edges
 plt.imsave("gaussian_filter.jpg", gaussian_filter)
@@ -189,8 +221,9 @@ wavelet_filter=denoise_wavelet(gaussian_img, multichannel=True, rescale_sigma=Tr
 plt.imsave("wavelet.jpg", wavelet_filter)
 psnrWavelet = psnr(gaussian_img, wavelet_filter)     #How noiser than original
 
-sp_img = skimage.util.random_noise(iar, mode="s&p")
+sp_img = skimage.util.random_noise(img, mode="s&p")
 plt.imsave("sp.jpg",sp_img)
+plt.imsave("greyimg.jpg",greyimg)
 
 print(psnrNoise)
 print(psnrGaussian)
@@ -199,6 +232,15 @@ print(sigma_est)
 print(psnrNonlocal)
 print(psnrTv)
 print(psnrWavelet)
+
+
+kernel = np.array([[1/16,2/16,1/16],[2/16,4/16, 2/16],[1/16,2/16,1/16]])
+image_gaussianblur = convolve2d(gaussian_greyimg,kernel)
+print ('\n First 5 columns and rows of the image_gaussianblur matrix: \n', image_gaussianblur[:5,:5]*255)
+plt.imsave("gaussianblurbyhand.jpg", image_gaussianblur)
+psnrGaussBlurByHand = psnr(greyimg, gaussian_greyimg)
+print(psnrGaussBlurByHand)
+
 
 
 #value = compare_ssim(iar, np.uint8(gimg))
