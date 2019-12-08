@@ -1,255 +1,185 @@
-import numpy as np
-import math
-from PIL import Image
-import matplotlib.pyplot as plt
-
-from scipy import ndimage as nd
-#from scipy import misc
-
+import os
 import skimage
 from skimage.metrics import peak_signal_noise_ratio
-from skimage import io
-from skimage.color import rgb2grey
+import torch
+import torchvision
+from torch import nn
+from torch.autograd import Variable
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchvision.datasets import MNIST
+from torchvision.utils import save_image
+import torch.nn.functional as F
+
+if not os.path.exists('./mlp_img'):
+    os.mkdir('./mlp_img')
 
 
-
-#from SSIM_PIL import compare_ssim
-
-img = io.imread("gorilla.jpg")
-greyimg = io.imread("gorilla.jpg", as_gray=True)
-
-#print ((img.histogram()))  if detecting what kind of the image has asked.
-
-#pix_val = list(img.getdata())
-#print(pix_val) #visits each pixel
-
-#iar = np.array(img)
-#print(iar)
+def to_img(x):
+    x = 0.5 * (x + 1)
+    x = x.clamp(0, 1)
+    x = x.view(x.size(0), 1, 28, 28)
+    return x
 
 
+num_epochs = 100
+batch_size = 128
+learning_rate = 1e-3
 
-def convolve2d(image, kernel):
-    # This function which takes an image and a kernel
-    # and returns the convolution of them
-    # Args:
-    #   image: a numpy array of size [image_height, image_width].
-    #   kernel: a numpy array of size [kernel_height, kernel_width].
-    # Returns:
-    #   a numpy array of size [image_height, image_width] (convolution output).
-
-    kernel = np.flipud(np.fliplr(kernel))  # Flip the kernel
-    output = np.zeros_like(image)  # convolution output
-    # Add zero padding to the input image
-    image_padded = np.zeros((image.shape[0] + 2, image.shape[1] + 2))
-    image_padded[1:-1, 1:-1] = image
-    for x in range(image.shape[1]):  # Loop over every pixel of the image
-        for y in range(image.shape[0]):
-            # element-wise multiplication of the kernel and the image
-            output[y, x] = (kernel * image_padded[y:y + 3, x:x + 3]).sum()
-    return output
+img_transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+])
 
 
-def noise_generator(noise_type, image):
-    """
-    Generate noise to a given Image based on required noise type
+transform_train = transforms.Compose([transforms.ToTensor(),
+transforms.Normalize((0.5,), (0.5,))
+])
 
-    Input parameters:
-        image: ndarray (input image data. It will be converted to float)
+trainset= MNIST(root='./data', download=True, transform=transform_train)
 
-        noise_type: string
-            'gauss'        Gaussian-distrituion based noise
-            'poission'     Poission-distribution based noise
-            's&p'          Salt and Pepper noise, 0 or 1
-            'speckle'      Multiplicative noise using out = image + n*image
-                           where n is uniform noise with specified mean & variance
-    """
-    row, col, ch = image.shape
-    if noise_type == "gauss":
-        mean = 0.0
-        var = 0.01
-        sigma = var ** 0.5
-        gauss = np.array(image.shape)
-        gauss = np.random.normal(mean, sigma, (row, col, ch))
-        gauss = gauss.reshape(row, col, ch)
-        noisy = image + gauss
-        return noisy.astype('uint8')
-    elif noise_type == "s&p":
-        s_vs_p = 0.5
-        amount = 0.004
-        out = image
-        # Generate Salt '1' noise
-        num_salt = np.ceil(amount * image.size * s_vs_p)
-        coords = [np.random.randint(0, i - 1, int(num_salt))
-                  for i in image.shape]
-        out[coords] = 255  #might add tuple here
-        # Generate Pepper '0' noise
-        num_pepper = np.ceil(amount * image.size * (1. - s_vs_p))
-        coords = [np.random.randint(0, i - 1, int(num_pepper))
-                  for i in image.shape]
-        out[coords] = 0      #might add tuple here
-        return out
-    elif noise_type == "poisson":
-        vals = len(np.unique(image))
-        vals = 2 ** np.ceil(np.log2(vals))
-        noisy = np.random.poisson(image * vals) / float(vals)
-        return noisy
-    elif noise_type == "speckle":
-        gauss = np.random.randn(row, col, ch)
-        gauss = gauss.reshape(row, col, ch)
-        noisy = image + image * gauss
-        return noisy
-    else:
-        return image
+#dataset = MNIST('./data', transform=img_transform, download=True)
+dataloader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+
 
 '''
-plt.figure(1)
-sp_im = noise_generator('poisson', iar)
-plt.imshow(sp_im)
-plt.axis('off')
-plt.show()
-plt.close(1)
-#print sp_im
+class autoencoder(nn.Module):
+    def __init__(self):
+        super(autoencoder, self).__init__()
+        self.encoder = nn.Sequential(
+            nn.Linear(28 * 28, 128),
+            nn.ReLU(True),
+            nn.Linear(128, 64),
+            nn.ReLU(True), nn.Linear(64, 12), nn.ReLU(True), nn.Linear(12, 3))
+        self.decoder = nn.Sequential(
+            nn.Linear(3, 12),
+            nn.ReLU(True),
+            nn.Linear(12, 64),
+            nn.ReLU(True),
+            nn.Linear(64, 128),
+            nn.ReLU(True), nn.Linear(128, 28 * 28), nn.Tanh())
+
+    def forward(self, x):
+        x = self.encoder(x)
+        x = self.decoder(x)
+        return x
 '''
 
-def signaltonoise(a, axis=0, ddof=0):
 
-    m = a.mean(axis)
-    sd = a.std(axis=axis, ddof=ddof)
-    return np.where(sd == 0, 0, m/sd)
+class AutoEncoder(nn.Module):
+    def __init__(self):
+        super(AutoEncoder, self).__init__()
+        # ====== ENCODER PART ======
+        # MNIST image is 1x28x28 (CxHxW)
+        # Pytorch expects input data as BxCxHxW
+        # B: Batch size
+        # C: number of channels gray scale images have 1 channel
+        # W: width of the image
+        # H: height of the image
 
+        # use 32 3x3 filters with padding
+        # padding is set to 1 so that image W,H is not changed after convolution
+        # stride is 2 so filters will move 2 pixels for next calculation
+        # W after conv2d  [(W - Kernelw + 2*padding)/stride] + 1
+        # after convolution we'll have Bx32 14x14 feature maps
+        self.conv1 = nn.Conv2d(in_channels=1,
+                               out_channels=32,
+                               kernel_size=3,
+                               stride=2,
+                               padding=1)
 
-def psnr(img1, img2):                   #PSNR high means good quality
-    mse = np.mean((img1 - img2) ** 2)
-    if mse == 0:
-        return 100
-    Pixel_max = 255.0
-    return 20 * math.log10(Pixel_max / math.sqrt(mse))
+        # after convolution we'll have Bx64 7x7 feature maps
+        self.conv2 = nn.Conv2d(in_channels=32,
+                               out_channels=64,
+                               kernel_size=3,
+                               stride=2,
+                               padding=1
+                               )
 
-'''
-plt.figure(figsize=(18,24))
-plt.subplot(421)
-plt.imshow(iar)
-plt.title('Original Image')
-plt.axis("off")
+        # first fully connected layer from 64*7*7=3136 input features to 16 hidden units
+        self.fc1 = nn.Linear(in_features=64 * 7 * 7,
+                             out_features=16)
 
-gauss_im = noise_generator('gaussian', iar)
-plt.subplot(422)
-SNR = peak_signal_noise_ratio(iar, gauss_im)
-print(SNR)
-Psnr = psnr(iar, gauss_im)
-print(Psnr)
+        self.fc2 = nn.Linear(in_features=16,
+                             out_features=64 * 7 * 7)
 
-plt.imshow(gauss_im)
-plt.title('Gaussian Noise')
-plt.axis("off")
+        # 32 14x14
+        self.conv_t1 = nn.ConvTranspose2d(in_channels=64,
+                                          out_channels=32,
+                                          kernel_size=3,
+                                          stride=2,
+                                          padding=1,
+                                          output_padding=1)
 
-sp_im = noise_generator('s&p', iar)
-plt.subplot(423)
-SNR = peak_signal_noise_ratio(iar, sp_im)
-print(SNR)
-plt.title('Salt & Pepper Noise')
-plt.imshow(sp_im)
-plt.axis("off")
-plt.show()
-'''
+        # 1 28x28
+        self.conv_t2 = nn.ConvTranspose2d(in_channels=32,
+                                          out_channels=1,
+                                          kernel_size=3,
+                                          stride=2,
+                                          padding=1,
+                                          output_padding=1)
 
-def plotnoise(iar, mode, r, c, i):     #Uses Skimage
-    plt.subplot(r,c,i)
-    if mode is not None:
-        gimg = skimage.util.random_noise(iar, mode=mode)  #produced noise
-        SNR = peak_signal_noise_ratio(iar, gimg)
-        PSNR = psnr(iar, gimg)
-        plt.imshow(gimg)
-        print(SNR)
-        print(PSNR)
-    else:
-        plt.imshow(iar)
-    plt.title(mode)
-    plt.axis("off")
-
-
-#SSIM Structural Similarity:Used for measuring the similarity between two images.
-
-'''
-plt.figure(figsize=(18,24))
-r=4
-c=2
-plotnoise(iar, "gaussian", r,c,1)
-plotnoise(iar, "localvar", r,c,2)
-plotnoise(iar, "poisson", r,c,3)
-plotnoise(iar, "salt", r,c,4)
-plotnoise(iar, "pepper", r,c,5)
-plotnoise(iar, "s&p", r,c,6)
-plotnoise(iar, "speckle", r,c,7)
-plotnoise(iar, None, r,c,8)
-plt.show()
-'''
-
-gaussian_greyimg = skimage.util.random_noise(greyimg, mode="gaussian")
-plt.imsave("gaussian_grey.jpg",gaussian_greyimg)
-psnrNoise = psnr(greyimg, gaussian_greyimg)
-
-gaussian_img = skimage.util.random_noise(img, mode="gaussian")
-plt.imsave("gaussian.jpg",gaussian_img)
-psnrNoise = psnr(img, gaussian_img)
-
-gaussian_filter = nd.gaussian_filter(gaussian_img, sigma=3)   #filters works as, it averages the values in image and replaces all the pixel with it.Gaussian filter does not preserve edges
-plt.imsave("gaussian_filter.jpg", gaussian_filter)
-psnrGaussian = psnr(gaussian_img, gaussian_filter)
-
-
-median_filter = nd.median_filter(gaussian_img, size=3)
-plt.imsave("median_filter.jpg", median_filter)
-psnrMedian = psnr(gaussian_img, median_filter)
-
-
-from skimage.restoration import denoise_nl_means, estimate_sigma, denoise_bilateral, denoise_tv_chambolle, denoise_wavelet
-
-sigma_est = np.mean(estimate_sigma(gaussian_img, multichannel=True))   #To be used in nonlocal_means filter.
-nonlocal_means = denoise_nl_means(gaussian_img, h=1.15*sigma_est, fast_mode=True, patch_size=5, patch_distance=3, multichannel=True)
-plt.imsave("nonlocal_means.jpg", nonlocal_means)
-psnrNonlocal = psnr(gaussian_img, nonlocal_means)
-
-tv_chambolle_filter= denoise_tv_chambolle(gaussian_img, weight=0.1, multichannel=True)
-plt.imsave("tv_chambolle.jpg", tv_chambolle_filter)
-psnrTv=psnr(gaussian_img,tv_chambolle_filter)
-
-#bilateral_filter=denoise_bilateral(gaussian_img, sigma_color=0.05, sigma_spatial=15, multichannel=True)   #Runs too slow.
-#plt.imsave("bilateral.jpg", bilateral_fiter)
-
-wavelet_filter=denoise_wavelet(gaussian_img, multichannel=True, rescale_sigma=True)
-plt.imsave("wavelet.jpg", wavelet_filter)
-psnrWavelet = psnr(gaussian_img, wavelet_filter)     #How noiser than original
-
-sp_img = skimage.util.random_noise(img, mode="s&p")
-plt.imsave("sp.jpg",sp_img)
-plt.imsave("greyimg.jpg",greyimg)
-
-print(psnrNoise)
-print(psnrGaussian)
-print(psnrMedian)
-print(sigma_est)
-print(psnrNonlocal)
-print(psnrTv)
-print(psnrWavelet)
-
-
-kernel = np.array([[1/16,2/16,1/16],[2/16,4/16, 2/16],[1/16,2/16,1/16]])
-image_gaussianblur = convolve2d(gaussian_greyimg,kernel)
-print ('\n First 5 columns and rows of the image_gaussianblur matrix: \n', image_gaussianblur[:5,:5]*255)
-plt.imsave("gaussianblurbyhand.jpg", image_gaussianblur)
-psnrGaussBlurByHand = psnr(greyimg, gaussian_greyimg)
-print(psnrGaussBlurByHand)
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = torch.flatten(x, 1)  # flatten feature maps, Bx (CxHxW)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = x.view(-1, 64, 7, 7)  # reshape back to feature map format
+        x = F.relu(self.conv_t1(x))
+        x = torch.tanh(self.conv_t2(x))
+        return x
 
 
 
-#value = compare_ssim(iar, np.uint8(gimg))
-#print(value)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+net = AutoEncoder().to(device)
+print(torch.cuda.current_device())
+print(torch.cuda.device(0))
+print(torch.cuda.get_device_name(0))
+print(torch.cuda.is_available())
+model = net.to(device)
+criterion = nn.MSELoss().to(device)
+optimizer = torch.optim.Adam(
+    model.parameters(), lr=learning_rate, weight_decay=1e-5)
 
-'''
-# compute the Structural Similarity Index (SSIM) between the two
-# images, ensuring that the difference image is returned
-(score, diff) = compare_ssim(img, gimg, full=True)
-diff = (diff * 255).astype("uint8")
-print("SSIM: {}".format(score))
-'''
+def train(net, loader, loss_func, optimizer):
+    net.train().to(device)  # put model in train mode
+    total_loss = torch.zeros(1).to(device)
+    for img, _ in loader:  # next batch
+        img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
+        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=2)
+        gaussian_img = torch.from_numpy(gaussian_img).to(device)
+        saltpepper_img = skimage.util.random_noise(img.cpu(), mode="s&p", amount=0.45)
+        saltpepper_img = torch.from_numpy(saltpepper_img).to(device)
+
+        img_ndarr = (img.cpu()).numpy()
+
+        #noise = torch.randn(*img.shape).to(device)  # generate random noise
+        #noised_img = img.masked_fill(noise > 0.5, 1)  # set image values at indices where noise >0.5  to 1
+        output = net(gaussian_img.float()).to(device)  # feed forward
+        loss = loss_func(output, img)  # calculate loss
+        output_ndarr = (output.cpu().detach()).numpy()
+        psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
+
+        optimizer.zero_grad()  # clear previous gradients
+        loss.backward()  # calculate new gradients
+        optimizer.step()  # update weights
+        total_loss += loss  # accumulate loss
+    return gaussian_img, img, output, total_loss, psnr
+
+for epoch in range(num_epochs):
+    noised_img, img, output, loss, psnr = train(net, dataloader, criterion, optimizer)
+    # log
+    print('epoch [{}/{}], loss:{:.4f}, SNR:{}'
+          .format(epoch + 1, num_epochs, loss.item()/60000, psnr))
+    if epoch % 10 == 0:
+        pic_org = to_img(img.cpu().data)
+        pic_noised = to_img(noised_img.cpu().data)
+        pic_pred = to_img(output.cpu().data)
+        save_image(pic_org, './denoise_image_org__{}.png'.format(epoch))
+        save_image(pic_noised, './denoise_image_noised__{}.png'.format(epoch))
+        save_image(pic_pred, './denoise_image_pred__{}.png'.format(epoch))
+
+# save the model
+torch.save(net.state_dict(), './conv_autoencoder.pth')
