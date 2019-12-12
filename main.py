@@ -28,7 +28,7 @@ def to_img(x):
 
 num_epochs = 200
 batch_size = 128
-learning_rate = 3e-4
+learning_rate = 1e-3
 
 img_transform = transforms.Compose([
     transforms.ToTensor(),
@@ -73,8 +73,11 @@ print(len(valid_idx))
 train_loader = DataLoader(
     train_dataset, batch_size=batch_size, sampler=train_sampler)        #Data/batchsize
 valid_loader = DataLoader(
-    valid_dataset, batch_size=batch_size, sampler=valid_sampler)        #Data/bathsize
+    train_dataset, batch_size=batch_size, sampler=valid_sampler)        #Data/bathsize
 
+
+print(len(train_loader))
+print(len(valid_loader))
 #dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
 '''
@@ -181,7 +184,7 @@ def train(model, loader, loss_func, optimizer):
     total_loss = torch.zeros(1).to(device)
     for img, _ in loader:  # next batch
         img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
-        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=2)
+        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
         gaussian_img = torch.from_numpy(gaussian_img).to(device)
         #saltpepper_img = skimage.util.random_noise(img.cpu(), mode="s&p", amount=0.45)
         #saltpepper_img = torch.from_numpy(saltpepper_img).to(device)
@@ -199,6 +202,7 @@ def train(model, loader, loss_func, optimizer):
         optimizer.step()  # update weights
         optimizer.zero_grad()  # clear previous gradients, backpropagation
         total_loss += loss  # accumulate loss
+
     return gaussian_img, img, output, total_loss, psnr
 
 
@@ -210,7 +214,7 @@ def valid(model):
             img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
             # image, labels = img
             # image = (img.cpu()).numpy()
-            gaussian_image = skimage.util.random_noise(img.cpu(), mode="gaussian", var=2)
+            gaussian_image = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
             gaussian_image = torch.from_numpy(gaussian_image).to(device)
             # image, labels = image.to(device), labels.to(device)
             output = model(gaussian_image.float().to(device))
@@ -248,9 +252,9 @@ for epoch in range(num_epochs):
     print('epoch [{}/{}], loss:{:.4f}, SNR:{}'
           .format(epoch + 1, num_epochs, loss.item()/48000, psnr))
     if epoch % 10 == 0:
-        pic_org = to_img(img.cpu().data)
-        pic_noised = to_img(noised_img.cpu().data)
-        pic_pred = to_img(output.cpu().data)
+        pic_org = to_img(img)
+        pic_noised = to_img(noised_img)
+        pic_pred = to_img(output)
         save_image(pic_org, './denoise_image_org__{}.png'.format(epoch))
         save_image(pic_noised, './denoise_image_noised__{}.png'.format(epoch))
         save_image(pic_pred, './denoise_image_pred__{}.png'.format(epoch))
@@ -260,9 +264,9 @@ for epoch in range(num_epochs):
     print('Validation_loss:{}, SNR: {}'
             .format(valid_loss.item()/12000, valid_psnr))
     if epoch % 10 == 0:
-        valid_org = to_img(valid_img.cpu().data)
-        valid_noisy = to_img(valid_noised_img.cpu().data)
-        valid_pic = to_img(valid_output.cpu().data)
+        valid_org = to_img(valid_img)
+        valid_noisy = to_img(valid_noised_img)
+        valid_pic = to_img(valid_output)
         save_image(valid_pic, './valid_denoise_image_pred{}.png'.format((epoch)))
         save_image(valid_noisy, './valid_denoise_image_noise_{}.png'.format((epoch)))
         save_image(valid_org, './valid_denoise_image_org_{}.png'.format((epoch)))
