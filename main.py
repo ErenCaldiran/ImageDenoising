@@ -44,26 +44,35 @@ transforms.Normalize((0.5,), (0.5,))
 
 # load the dataset
 train_dataset = MNIST(
-    root='./data', train=True,
+    root='./data',
     download=True, transform=transform_train,)
 
-valid_dataset = MNIST(
-    root='./data', train=True,
-    download=True, transform=transform_train,)
+#valid_dataset = MNIST(
+ #   root='./data', train=False,
+  #  download=True, transform=transform_train,)
 
-num_train = len(train_dataset)
-indices = list(range(num_train))
-split = int(np.floor(0.2 * num_train))
+#print(len(valid_dataset))
+#print(len(train_dataset))
+
+test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (40000, 20000))
+
+print(len(test_ds))
+print(len(valid_ds))
+
+
+#num_train = len(train_dataset)
+#indices = list(range(num_train))
+#split = int(np.floor(0.2 * num_train))
 
 #print(np.random.seed())   #these lines?
-np.random.shuffle(indices)
+#np.random.shuffle(indices)
 
-train_idx, valid_idx = indices[split:], indices[:split]
-train_sampler = SubsetRandomSampler(train_idx)
-valid_sampler = SubsetRandomSampler(valid_idx)
+#train_idx, valid_idx = indices[split:], indices[:split]
+#train_sampler = SubsetRandomSampler(train_idx)
+#valid_sampler = SubsetRandomSampler(valid_idx)
 
-print(len(train_idx))
-print(len(valid_idx))
+#print(len(train_idx))
+#print(len(valid_idx))
 
 
 #validation_set = torch.utils.data.random_split(trainset, 0.6)
@@ -71,9 +80,9 @@ print(len(valid_idx))
 
 
 train_loader = DataLoader(
-    train_dataset, batch_size=batch_size, sampler=train_sampler)        #Data/batchsize
+    test_ds, batch_size=batch_size, shuffle=True)        #Data/batchsize
 valid_loader = DataLoader(
-    train_dataset, batch_size=batch_size, sampler=valid_sampler)        #Data/bathsize
+    valid_ds, batch_size=batch_size, shuffle=True)        #Data/bathsize
 
 
 print(len(train_loader))
@@ -125,8 +134,6 @@ class AutoEncoder(nn.Module):
                                stride=2,
                                padding=1)
 
-        nn.Dropout(0.5)
-
         # after convolution we'll have Bx64 7x7 feature maps
         self.conv2 = nn.Conv2d(in_channels=32,
                                out_channels=64,
@@ -135,13 +142,10 @@ class AutoEncoder(nn.Module):
                                padding=1
                                )
 
-        nn.Dropout(0.5)
-
         # first fully connected layer from 64*7*7=3136 input features to 16 hidden units
         self.fc1 = nn.Linear(in_features=64 * 7 * 7,
                              out_features=16)
 
-        nn.Dropout(0.5)
 
         self.fc2 = nn.Linear(in_features=16,
                              out_features=64 * 7 * 7)
@@ -164,9 +168,12 @@ class AutoEncoder(nn.Module):
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
+        nn.Dropout(0.5)
         x = F.relu(self.conv2(x))
+        nn.Dropout(0.5)
         x = torch.flatten(x, 1)  # flatten feature maps, Bx (CxHxW)
         x = F.relu(self.fc1(x))
+        nn.Dropout(0.5)
         x = F.relu(self.fc2(x))
         x = x.view(-1, 64, 7, 7)  # reshape back to feature map format
         x = F.relu(self.conv_t1(x))
@@ -177,7 +184,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AutoEncoder().to(device)
 criterion = nn.MSELoss().to(device)
 optimizer = torch.optim.Adam(
-    model.parameters(), lr=learning_rate, weight_decay=3e-4)
+    model.parameters(), lr=learning_rate, weight_decay=1e-3)
 
 def train(model, loader, loss_func, optimizer):
     model.train().to(device)  # put  in train mode
@@ -191,6 +198,7 @@ def train(model, loader, loss_func, optimizer):
 
         img_ndarr = (img.cpu()).numpy()
 
+
         #noise = torch.randn(*img.shape).to(device)  # generate random noise
         #noised_img = img.masked_fill(noise > 0.5, 1)  # set image values at indices where noise >0.5  to 1
         output = model(gaussian_img.float()).to(device)  # feed forward
@@ -198,9 +206,9 @@ def train(model, loader, loss_func, optimizer):
         output_ndarr = (output.cpu().detach()).numpy()
         psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
 
+        optimizer.zero_grad()
         loss.backward()  # calculate new gradients
         optimizer.step()  # update weights
-        optimizer.zero_grad()  # clear previous gradients, backpropagation
         total_loss += loss  # accumulate loss
 
     return gaussian_img, img, output, total_loss, psnr
@@ -209,6 +217,8 @@ def train(model, loader, loss_func, optimizer):
 def valid(model):
     model.eval().to(device)  # Sets Train=False
     valid_loss = torch.zeros(1).to(device)
+    running_loss=0
+    i=0
     with torch.no_grad():
         for img, _ in valid_loader:
             img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
@@ -219,10 +229,12 @@ def valid(model):
             # image, labels = image.to(device), labels.to(device)
             output = model(gaussian_image.float().to(device))
             valid_loss += criterion(output, img)  # calculate loss
+            mean_loss = valid_loss / (i+1)
             img_ndarr = (img.cpu()).numpy()
             output_ndarr = (output.cpu().detach()).numpy()
             psnr = peak_signal_noise_ratio(img_ndarr, output_ndarr)
-        return gaussian_image, img, output, valid_loss, psnr
+        running_loss += mean_loss
+        return gaussian_image, img, output, running_loss, psnr
 
 
 '''
@@ -240,7 +252,6 @@ def valid(model,loader,loss_func):
         psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
         loss.backward()  # calculate new gradients
         total_loss += loss  # accumulate loss
-
     return gaussian_img, img, output, total_loss, psnr
 '''
 
@@ -250,22 +261,22 @@ for epoch in range(num_epochs):
    # valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr = valid(model, valid_loader,criterion)
     # log
     print('epoch [{}/{}], loss:{:.4f}, SNR:{}'
-          .format(epoch + 1, num_epochs, loss.item()/48000, psnr))
+          .format(epoch + 1, num_epochs, loss.item()/40000, psnr))
     if epoch % 10 == 0:
-        pic_org = to_img(img)
-        pic_noised = to_img(noised_img)
+        pic_org = (img)
+        pic_noised = (noised_img)
         pic_pred = to_img(output)
         save_image(pic_org, './denoise_image_org__{}.png'.format(epoch))
         save_image(pic_noised, './denoise_image_noised__{}.png'.format(epoch))
         save_image(pic_pred, './denoise_image_pred__{}.png'.format(epoch))
 
         #ValidationLoss function starts
-    valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr = valid(model)
+    valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr= valid(model)
     print('Validation_loss:{}, SNR: {}'
-            .format(valid_loss.item()/12000, valid_psnr))
+            .format(valid_loss.item()/20000, valid_psnr))
     if epoch % 10 == 0:
-        valid_org = to_img(valid_img)
-        valid_noisy = to_img(valid_noised_img)
+        valid_org = (valid_img)
+        valid_noisy = (valid_noised_img)
         valid_pic = to_img(valid_output)
         save_image(valid_pic, './valid_denoise_image_pred{}.png'.format((epoch)))
         save_image(valid_noisy, './valid_denoise_image_noise_{}.png'.format((epoch)))
@@ -282,5 +293,5 @@ for epoch in range(num_epochs):
         save_image(pic_noised, './valid_denoise_image_noised__{}.png'.format(epoch))
         save_image(pic_pred, './valid_denoise_image_pred__{}.png'.format(epoch))
 '''
-# save the 
+# save the
 torch.save(model.state_dict(), './conv_autoencoder.pth')
