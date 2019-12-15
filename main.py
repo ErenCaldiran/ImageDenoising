@@ -54,7 +54,7 @@ train_dataset = MNIST(
 #print(len(valid_dataset))
 #print(len(train_dataset))
 
-test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (40000, 20000))
+test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (48000, 12000))
 
 print(len(test_ds))
 print(len(valid_ds))
@@ -134,6 +134,10 @@ class AutoEncoder(nn.Module):
                                stride=2,
                                padding=1)
 
+        nn.MaxPool2d(2, stride=2),  # b, 16, 5, 5
+
+        #self.bn1=nn.BatchNorm1d(32*14*14)      #makes it worse
+
         # after convolution we'll have Bx64 7x7 feature maps
         self.conv2 = nn.Conv2d(in_channels=32,
                                out_channels=64,
@@ -142,13 +146,45 @@ class AutoEncoder(nn.Module):
                                padding=1
                                )
 
+        nn.MaxPool2d(2, stride=2),  # b, 16, 5, 5
+
+        #self.bn2=nn.BatchNorm1d(64*7*7)
+
+        '''
+        # after convolution we'll have Bx128 5x5 feature maps
+        self.conv3 = nn.Conv2d(in_channels=64,
+                               out_channels=98,
+                               kernel_size=3,
+                               stride=2,
+                               padding=1
+                               )
+        '''
+        self.fc11 = nn.Linear(in_features=64*7*7,
+                              out_features=98)
+
+        #nn.MaxPool2d(2, stride=2) makes it worse
+        #self.bn2 = nn.BatchNorm1d(98)
+
         # first fully connected layer from 64*7*7=3136 input features to 16 hidden units
-        self.fc1 = nn.Linear(in_features=64 * 7 * 7,
+        self.fc1 = nn.Linear(in_features=98,
                              out_features=16)
 
+        #self.bn3=nn.BatchNorm1d(16)
 
         self.fc2 = nn.Linear(in_features=16,
-                             out_features=64 * 7 * 7)
+                             out_features=98 )
+
+        self.fc22 = nn.Linear(in_features=98,
+                              out_features=64*7*7)
+
+        '''
+        self.conv_t11 = nn.ConvTranspose2d(in_channels=98,
+                                           out_channels=64,
+                                           kernel_size=3,
+                                           stride=2,
+                                           padding=1,
+                                           output_padding=1)
+        '''
 
         # 32 14x14
         self.conv_t1 = nn.ConvTranspose2d(in_channels=64,
@@ -168,15 +204,20 @@ class AutoEncoder(nn.Module):
 
     def forward(self, x):
         x = F.relu(self.conv1(x))
-        nn.Dropout(0.5)
+        #nn.Dropout(0.5) makes it worse
         x = F.relu(self.conv2(x))
-        nn.Dropout(0.5)
+        #nn.Dropout(0.5)    makes it worse
         x = torch.flatten(x, 1)  # flatten feature maps, Bx (CxHxW)
+        x = F.relu(self.fc11(x))
         x = F.relu(self.fc1(x))
-        nn.Dropout(0.5)
+        #nn.Dropout(0.5)
         x = F.relu(self.fc2(x))
+        x = F.relu(self.fc22(x))
+        #nn.Dropout(0.5)
         x = x.view(-1, 64, 7, 7)  # reshape back to feature map format
+        x#=F.relu(self.conv_t11(x))
         x = F.relu(self.conv_t1(x))
+        #nn.Dropout(0.5)
         x = torch.tanh(self.conv_t2(x))
         return x
 
@@ -184,7 +225,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AutoEncoder().to(device)
 criterion = nn.MSELoss().to(device)
 optimizer = torch.optim.Adam(
-    model.parameters(), lr=learning_rate, weight_decay=1e-3)
+    model.parameters(), lr=learning_rate) #Weight decay used to prevent oscillations, 4e-3 is ideal.
 
 def train(model, loader, loss_func, optimizer):
     model.train().to(device)  # put  in train mode
@@ -198,7 +239,7 @@ def train(model, loader, loss_func, optimizer):
 
         img_ndarr = (img.cpu()).numpy()
 
-
+        optimizer.zero_grad()
         #noise = torch.randn(*img.shape).to(device)  # generate random noise
         #noised_img = img.masked_fill(noise > 0.5, 1)  # set image values at indices where noise >0.5  to 1
         output = model(gaussian_img.float()).to(device)  # feed forward
@@ -206,20 +247,20 @@ def train(model, loader, loss_func, optimizer):
         output_ndarr = (output.cpu().detach()).numpy()
         psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
 
-        optimizer.zero_grad()
         loss.backward()  # calculate new gradients
         optimizer.step()  # update weights
-        total_loss += loss  # accumulate loss
+        total_loss += loss.item()  # accumulate loss
 
     return gaussian_img, img, output, total_loss, psnr
 
 
 def valid(model):
-    model.eval().to(device)  # Sets Train=False
-    valid_loss = torch.zeros(1).to(device)
-    running_loss=0
-    i=0
     with torch.no_grad():
+        model.eval().to(device)
+        valid_loss = torch.zeros(1).to(device)
+        running_loss=0
+        i=0
+    #with torch.no_grad():
         for img, _ in valid_loader:
             img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
             # image, labels = img
@@ -261,7 +302,7 @@ for epoch in range(num_epochs):
    # valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr = valid(model, valid_loader,criterion)
     # log
     print('epoch [{}/{}], loss:{:.4f}, SNR:{}'
-          .format(epoch + 1, num_epochs, loss.item()/40000, psnr))
+          .format(epoch + 1, num_epochs, loss.item()/len(train_loader), psnr))
     if epoch % 10 == 0:
         pic_org = (img)
         pic_noised = (noised_img)
@@ -273,7 +314,7 @@ for epoch in range(num_epochs):
         #ValidationLoss function starts
     valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr= valid(model)
     print('Validation_loss:{}, SNR: {}'
-            .format(valid_loss.item()/20000, valid_psnr))
+            .format(valid_loss.item()/len(valid_loader), valid_psnr))
     if epoch % 10 == 0:
         valid_org = (valid_img)
         valid_noisy = (valid_noised_img)
