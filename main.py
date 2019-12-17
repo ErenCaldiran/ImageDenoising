@@ -54,7 +54,7 @@ train_dataset = MNIST(
 #print(len(valid_dataset))
 #print(len(train_dataset))
 
-test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (48000, 12000))
+test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (50000, 10000))
 
 print(len(test_ds))
 print(len(valid_ds))
@@ -243,7 +243,7 @@ def train(model, loader, loss_func, optimizer):
         #noise = torch.randn(*img.shape).to(device)  # generate random noise
         #noised_img = img.masked_fill(noise > 0.5, 1)  # set image values at indices where noise >0.5  to 1
         output = model(gaussian_img.float()).to(device)  # feed forward
-        loss = loss_func(output, img)  # calculate loss
+        loss = loss_func(output, img)    # calculate loss
         output_ndarr = (output.cpu().detach()).numpy()
         psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
 
@@ -258,8 +258,6 @@ def valid(model):
     with torch.no_grad():
         model.eval().to(device)
         valid_loss = torch.zeros(1).to(device)
-        running_loss=0
-        i=0
     #with torch.no_grad():
         for img, _ in valid_loader:
             img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
@@ -270,12 +268,10 @@ def valid(model):
             # image, labels = image.to(device), labels.to(device)
             output = model(gaussian_image.float().to(device))
             valid_loss += criterion(output, img)  # calculate loss
-            mean_loss = valid_loss / (i+1)
             img_ndarr = (img.cpu()).numpy()
             output_ndarr = (output.cpu().detach()).numpy()
             psnr = peak_signal_noise_ratio(img_ndarr, output_ndarr)
-        running_loss += mean_loss
-        return gaussian_image, img, output, running_loss, psnr
+        return gaussian_image, img, output, valid_loss, psnr
 
 
 '''
