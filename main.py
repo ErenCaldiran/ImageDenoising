@@ -11,8 +11,24 @@ from torchvision import transforms
 from torchvision.datasets import MNIST
 from torchvision.utils import save_image
 import torch.nn.functional as F
+
+from matplotlib import pyplot as plt
+import plotly.graph_objs as go
+import plotly.offline as py
+
+from matplotlib.animation import FuncAnimation
+
+
+plt.style.use('fivethirtyeight')
+
+
 from torch.utils.data.sampler import SubsetRandomSampler
-from torch.utils.data.dataset import random_split
+
+#from livelossplot import PlotLosses
+
+#from epochsviz import Epochsviz
+
+#eviz = Epochsviz()
 
 
 if not os.path.exists('./mlp_img'):
@@ -26,7 +42,7 @@ def to_img(x):
     return x
 
 
-num_epochs = 200
+num_epochs = 101
 batch_size = 128
 learning_rate = 1e-3
 
@@ -172,9 +188,9 @@ class AutoEncoder(nn.Module):
         #self.bn3=nn.BatchNorm1d(16)
 
         self.fc2 = nn.Linear(in_features=16,
-                             out_features=98 )
+                             out_features=196)
 
-        self.fc22 = nn.Linear(in_features=98,
+        self.fc22 = nn.Linear(in_features=196,
                               out_features=64*7*7)
 
         '''
@@ -227,10 +243,10 @@ criterion = nn.MSELoss().to(device)
 optimizer = torch.optim.Adam(
     model.parameters(), lr=learning_rate) #Weight decay used to prevent oscillations, 4e-3 is ideal.
 
-def train(model, loader, loss_func, optimizer):
+def train():
     model.train().to(device)  # put  in train mode
     total_loss = torch.zeros(1).to(device)
-    for img, _ in loader:  # next batch
+    for img, _ in train_loader:  # next batch
         img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
         gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
         gaussian_img = torch.from_numpy(gaussian_img).to(device)
@@ -243,7 +259,7 @@ def train(model, loader, loss_func, optimizer):
         #noise = torch.randn(*img.shape).to(device)  # generate random noise
         #noised_img = img.masked_fill(noise > 0.5, 1)  # set image values at indices where noise >0.5  to 1
         output = model(gaussian_img.float()).to(device)  # feed forward
-        loss = loss_func(output, img)    # calculate loss
+        loss = criterion(output, img)    # calculate loss
         output_ndarr = (output.cpu().detach()).numpy()
         psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
 
@@ -251,10 +267,11 @@ def train(model, loader, loss_func, optimizer):
         optimizer.step()  # update weights
         total_loss += loss.item()  # accumulate loss
 
+
     return gaussian_img, img, output, total_loss, psnr
 
 
-def valid(model):
+def valid():
     with torch.no_grad():
         model.eval().to(device)
         valid_loss = torch.zeros(1).to(device)
@@ -271,6 +288,7 @@ def valid(model):
             img_ndarr = (img.cpu()).numpy()
             output_ndarr = (output.cpu().detach()).numpy()
             psnr = peak_signal_noise_ratio(img_ndarr, output_ndarr)
+
         return gaussian_image, img, output, valid_loss, psnr
 
 
@@ -292,43 +310,96 @@ def valid(model,loader,loss_func):
     return gaussian_img, img, output, total_loss, psnr
 '''
 
-for epoch in range(num_epochs):
-    noised_img, img, output, loss, psnr = train(model, train_loader, criterion, optimizer)
+#liveloss = PlotLosses()
+#logs = {}
+epocharray = []
+trainlossarray = []
+validlossarray = []
+inTotalData = 0
 
-   # valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr = valid(model, valid_loader,criterion)
-    # log
+for epoch in range(num_epochs):
+    noised_img, img, output, loss, psnr = train()
+    valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr = valid()
+
+    epocharray.append(epoch)
+    trainlossarray.append(loss.item()/len(train_loader))
+    validlossarray.append(valid_loss.item()/len(valid_loader))
+
+
+
+    #eviz.send_data(current_epoch=epoch,
+    #              current_train_loss=loss/len(train_loader),
+    #             current_val_loss=valid_loss/len(valid_loader))
+    #logs['train'] = loss.item()/len(train_loader)
+    #liveloss.update(logs)
     print('epoch [{}/{}], loss:{:.4f}, SNR:{}'
-          .format(epoch + 1, num_epochs, loss.item()/len(train_loader), psnr))
-    if epoch % 10 == 0:
+        .format(epoch + 1, num_epochs, loss.item()/len(train_loader), psnr))
+    print('Validation_loss:{}, SNR: {}'
+        .format(valid_loss.item() / len(valid_loader), valid_psnr))
+    if epoch % 25 == 0:
         pic_org = (img)
         pic_noised = (noised_img)
         pic_pred = to_img(output)
         save_image(pic_org, './denoise_image_org__{}.png'.format(epoch))
         save_image(pic_noised, './denoise_image_noised__{}.png'.format(epoch))
         save_image(pic_pred, './denoise_image_pred__{}.png'.format(epoch))
-
-        #ValidationLoss function starts
-    valid_noised_img, valid_img, valid_output, valid_loss, valid_psnr= valid(model)
-    print('Validation_loss:{}, SNR: {}'
-            .format(valid_loss.item()/len(valid_loader), valid_psnr))
-    if epoch % 10 == 0:
         valid_org = (valid_img)
         valid_noisy = (valid_noised_img)
-        valid_pic = to_img(valid_output)
+        valid_pic = to_img(valid_output.cpu().data)
         save_image(valid_pic, './valid_denoise_image_pred{}.png'.format((epoch)))
         save_image(valid_noisy, './valid_denoise_image_noise_{}.png'.format((epoch)))
         save_image(valid_org, './valid_denoise_image_org_{}.png'.format((epoch)))
+#liveloss.draw()
+
+#ani = FuncAnimation(plt.gcf(), output(), interval=5000)
+
+totalErr = go.Scatter(x=epocharray,
+                            y=trainlossarray,
+                            name = "Train loss",
+                            marker={'color': 'blue', 'symbol': 100, 'size': 3},
+                            mode="lines")
+
+validErr = go.Scatter(x=epocharray,
+                            y=validlossarray,
+                            name = "Valid loss",
+                            marker={'color': 'red', 'symbol': 100, 'size': 3},
+                            mode="lines")
+
+inTotalData = [totalErr,validErr]
+
+layout = dict(title = 'Train and validation loss',
+              xaxis = dict(title = 'Epoch'),
+              yaxis = dict(title = 'Loss'),
+              )
+
+InTotalfigure = dict(data=inTotalData, layout=layout)
+
+
+    #fig.data[0].y = trainlossarray[:epoch]
+
+py.plot(InTotalfigure, filename='InboundTotalErrorByDays.html', show_link=True)
+
 
 '''
-    print('valid_epoch [{}/{}], valid_loss:{:.4f}, valid_SNR:{}'
-          .format(epoch + 1, num_epochs, valid_loss.item()/60000, valid_psnr))
-    if epoch % 10 == 0:
-        pic_org = to_img(valid_img.cpu().data)
-        pic_noised = to_img(valid_noised_img.cpu().data)
-        pic_pred = to_img(valid_output.cpu().data)
-        save_image(pic_org, './valid_denoise_image_org__{}.png'.format(epoch))
-        save_image(pic_noised, './valid_denoise_image_noised__{}.png'.format(epoch))
-        save_image(pic_pred, './valid_denoise_image_pred__{}.png'.format(epoch))
+plt.cla()
+plt.plot(0, trainlossarray[0], label='Train loss')
+plt.plot(0, validlossarray[0], label='Valid loss')
+plt.plot(1, trainlossarray[1], label='Train loss')
+plt.plot(1, validlossarray[1], label='Valid loss')
+plt.plot(2, trainlossarray[2], label='Train loss')
+plt.plot(2, validlossarray[2], label='Valid loss')
+plt.plot(3, trainlossarray[3], label='Train loss')
+plt.plot(3, validlossarray[3], label='Valid loss')
+plt.plot(4, trainlossarray[4], label='Train loss')
+plt.plot(4, validlossarray[4], label='Valid loss')
+
+
+plt.legend(loc='upper left')
+plt.tight_layout()
+plt.show()
 '''
-# save the
+
 torch.save(model.state_dict(), './conv_autoencoder.pth')
+
+#eviz.start_thread(train_function=printt)
+
