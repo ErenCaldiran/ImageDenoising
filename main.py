@@ -16,19 +16,9 @@ from matplotlib import pyplot as plt
 import plotly.graph_objs as go
 import plotly.offline as py
 
-from matplotlib.animation import FuncAnimation
-
-
 plt.style.use('fivethirtyeight')
 
-
 from torch.utils.data.sampler import SubsetRandomSampler
-
-#from livelossplot import PlotLosses
-
-#from epochsviz import Epochsviz
-
-#eviz = Epochsviz()
 
 
 if not os.path.exists('./mlp_img'):
@@ -42,7 +32,7 @@ def to_img(x):
     return x
 
 
-num_epochs = 101
+num_epochs = 351
 batch_size = 128
 learning_rate = 1e-3
 
@@ -58,37 +48,21 @@ transforms.Normalize((0.5,), (0.5,))
 
 #trainset= MNIST(root='./data', download=True, transform=transform_train)
 
-# load the dataset
 train_dataset = MNIST(
     root='./data',
     download=True, transform=transform_train,)
 
-#valid_dataset = MNIST(
- #   root='./data', train=False,
-  #  download=True, transform=transform_train,)
+valid_dataset = MNIST(
+    root='./data', train=False,
+    download=True, transform=transform_train,)
 
-#print(len(valid_dataset))
-#print(len(train_dataset))
+print(len(train_dataset))
+print(len(valid_dataset))
 
-test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (50000, 10000))
+#test_ds, valid_ds = torch.utils.data.random_split(train_dataset, (50000, 10000))
 
-print(len(test_ds))
-print(len(valid_ds))
-
-
-#num_train = len(train_dataset)
-#indices = list(range(num_train))
-#split = int(np.floor(0.2 * num_train))
-
-#print(np.random.seed())   #these lines?
-#np.random.shuffle(indices)
-
-#train_idx, valid_idx = indices[split:], indices[:split]
-#train_sampler = SubsetRandomSampler(train_idx)
-#valid_sampler = SubsetRandomSampler(valid_idx)
-
-#print(len(train_idx))
-#print(len(valid_idx))
+#print(len(test_ds))
+#print(len(valid_ds))
 
 
 #validation_set = torch.utils.data.random_split(trainset, 0.6)
@@ -96,9 +70,9 @@ print(len(valid_ds))
 
 
 train_loader = DataLoader(
-    test_ds, batch_size=batch_size, shuffle=True)        #Data/batchsize
+    train_dataset, batch_size=batch_size, shuffle=True)        #Data/batchsize
 valid_loader = DataLoader(
-    valid_ds, batch_size=batch_size, shuffle=True)        #Data/bathsize
+    valid_dataset, batch_size=batch_size, shuffle=True)        #Data/bathsize
 
 
 print(len(train_loader))
@@ -131,7 +105,6 @@ class autoencoder(nn.Module):
 class AutoEncoder(nn.Module):
     def __init__(self):
         super(AutoEncoder, self).__init__()
-        # ====== ENCODER PART ======
         # MNIST image is 1x28x28 (CxHxW)
         # Pytorch expects input data as BxCxHxW
         # B: Batch size
@@ -176,13 +149,13 @@ class AutoEncoder(nn.Module):
                                )
         '''
         self.fc11 = nn.Linear(in_features=64*7*7,
-                              out_features=98)
+                              out_features=196)
 
         #nn.MaxPool2d(2, stride=2) makes it worse
         #self.bn2 = nn.BatchNorm1d(98)
 
         # first fully connected layer from 64*7*7=3136 input features to 16 hidden units
-        self.fc1 = nn.Linear(in_features=98,
+        self.fc1 = nn.Linear(in_features=196,
                              out_features=16)
 
         #self.bn3=nn.BatchNorm1d(16)
@@ -244,11 +217,11 @@ optimizer = torch.optim.Adam(
     model.parameters(), lr=learning_rate) #Weight decay used to prevent oscillations, 4e-3 is ideal.
 
 def train():
-    model.train().to(device)  # put  in train mode
+    model.train().cuda()  # put  in train mode #.to(device) in laptop
     total_loss = torch.zeros(1).to(device)
     for img, _ in train_loader:  # next batch
         img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
-        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
+        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.2)
         gaussian_img = torch.from_numpy(gaussian_img).to(device)
         #saltpepper_img = skimage.util.random_noise(img.cpu(), mode="s&p", amount=0.45)
         #saltpepper_img = torch.from_numpy(saltpepper_img).to(device)
@@ -256,8 +229,7 @@ def train():
         img_ndarr = (img.cpu()).numpy()
 
         optimizer.zero_grad()
-        #noise = torch.randn(*img.shape).to(device)  # generate random noise
-        #noised_img = img.masked_fill(noise > 0.5, 1)  # set image values at indices where noise >0.5  to 1
+
         output = model(gaussian_img.float()).to(device)  # feed forward
         loss = criterion(output, img)    # calculate loss
         output_ndarr = (output.cpu().detach()).numpy()
@@ -273,15 +245,15 @@ def train():
 
 def valid():
     with torch.no_grad():
-        model.eval().to(device)
+        model.eval().cuda()  #.to(device) in laptop
         valid_loss = torch.zeros(1).to(device)
-    #with torch.no_grad():
         for img, _ in valid_loader:
             img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
-            # image, labels = img
-            # image = (img.cpu()).numpy()
-            gaussian_image = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
+
+            gaussian_image = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.2)
             gaussian_image = torch.from_numpy(gaussian_image).to(device)
+            #saltpepper_img = skimage.util.random_noise(img.cpu(), mode="s&p", amount=0.45)
+            #saltpepper_img = torch.from_numpy(saltpepper_img).to(device)
             # image, labels = image.to(device), labels.to(device)
             output = model(gaussian_image.float().to(device))
             valid_loss += criterion(output, img)  # calculate loss
@@ -291,30 +263,11 @@ def valid():
 
         return gaussian_image, img, output, valid_loss, psnr
 
-
-'''
-def valid(model,loader,loss_func):
-    model.eval().to(device)
-    total_loss = torch.zeros(1).to(device)
-    for img, _ in loader:  # next batch
-        img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
-        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=2)
-        gaussian_img = torch.from_numpy(gaussian_img).to(device)
-        img_ndarr = (img.cpu()).numpy()
-        output = model(gaussian_img.float()).to(device)  # feed forward
-        loss = loss_func(output, img)  # calculate loss
-        output_ndarr = (output.cpu().detach()).numpy()
-        psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
-        loss.backward()  # calculate new gradients
-        total_loss += loss  # accumulate loss
-    return gaussian_img, img, output, total_loss, psnr
-'''
-
-#liveloss = PlotLosses()
-#logs = {}
 epocharray = []
 trainlossarray = []
 validlossarray = []
+trainsnr = []
+validsnr = []
 inTotalData = 0
 
 for epoch in range(num_epochs):
@@ -324,19 +277,14 @@ for epoch in range(num_epochs):
     epocharray.append(epoch)
     trainlossarray.append(loss.item()/len(train_loader))
     validlossarray.append(valid_loss.item()/len(valid_loader))
+    trainsnr.append((psnr))
+    validsnr.append((valid_psnr))
 
-
-
-    #eviz.send_data(current_epoch=epoch,
-    #              current_train_loss=loss/len(train_loader),
-    #             current_val_loss=valid_loss/len(valid_loader))
-    #logs['train'] = loss.item()/len(train_loader)
-    #liveloss.update(logs)
     print('epoch [{}/{}], loss:{:.4f}, SNR:{}'
         .format(epoch + 1, num_epochs, loss.item()/len(train_loader), psnr))
     print('Validation_loss:{}, SNR: {}'
         .format(valid_loss.item() / len(valid_loader), valid_psnr))
-    if epoch % 25 == 0:
+    if epoch % 50 == 0:
         pic_org = (img)
         pic_noised = (noised_img)
         pic_pred = to_img(output)
@@ -349,11 +297,8 @@ for epoch in range(num_epochs):
         save_image(valid_pic, './valid_denoise_image_pred{}.png'.format((epoch)))
         save_image(valid_noisy, './valid_denoise_image_noise_{}.png'.format((epoch)))
         save_image(valid_org, './valid_denoise_image_org_{}.png'.format((epoch)))
-#liveloss.draw()
 
-#ani = FuncAnimation(plt.gcf(), output(), interval=5000)
-
-totalErr = go.Scatter(x=epocharray,
+trainErr = go.Scatter(x=epocharray,
                             y=trainlossarray,
                             name = "Train loss",
                             marker={'color': 'blue', 'symbol': 100, 'size': 3},
@@ -365,7 +310,7 @@ validErr = go.Scatter(x=epocharray,
                             marker={'color': 'red', 'symbol': 100, 'size': 3},
                             mode="lines")
 
-inTotalData = [totalErr,validErr]
+inTotalData = [trainErr,validErr]
 
 layout = dict(title = 'Train and validation loss',
               xaxis = dict(title = 'Epoch'),
@@ -374,32 +319,30 @@ layout = dict(title = 'Train and validation loss',
 
 InTotalfigure = dict(data=inTotalData, layout=layout)
 
-
-    #fig.data[0].y = trainlossarray[:epoch]
-
-py.plot(InTotalfigure, filename='InboundTotalErrorByDays.html', show_link=True)
+py.plot(InTotalfigure, filename='SaltandPepperboth045.html', show_link=True)
 
 
-'''
-plt.cla()
-plt.plot(0, trainlossarray[0], label='Train loss')
-plt.plot(0, validlossarray[0], label='Valid loss')
-plt.plot(1, trainlossarray[1], label='Train loss')
-plt.plot(1, validlossarray[1], label='Valid loss')
-plt.plot(2, trainlossarray[2], label='Train loss')
-plt.plot(2, validlossarray[2], label='Valid loss')
-plt.plot(3, trainlossarray[3], label='Train loss')
-plt.plot(3, validlossarray[3], label='Valid loss')
-plt.plot(4, trainlossarray[4], label='Train loss')
-plt.plot(4, validlossarray[4], label='Valid loss')
+trainSNR = go.Scatter(x=epocharray,
+                           y=trainsnr,
+                           name = "Train snr",
+                           marker={'color': 'blue', 'symbol': 100, 'size': 3},
+                           mode="lines")
 
+validSNR = go.Scatter(x=epocharray,
+                      y=validsnr,
+                      name="Valid snr",
+                      marker={'color': 'red', 'symbol': 100, 'size': 3},
+                      mode="lines")
 
-plt.legend(loc='upper left')
-plt.tight_layout()
-plt.show()
-'''
+TotalData = [trainSNR,validSNR]
+
+SNRlayout = dict(title = 'Train and validation snr',
+              xaxis = dict(title = 'Epoch'),
+              yaxis = dict(title = 'Loss'),
+              )
+
+Totalfigure = dict(data=TotalData, layout=SNRlayout)
+
+py.plot(Totalfigure, filename='SNRboth045.html', show_link=True)
 
 torch.save(model.state_dict(), './conv_autoencoder.pth')
-
-#eviz.start_thread(train_function=printt)
-
