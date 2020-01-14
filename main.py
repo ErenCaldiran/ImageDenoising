@@ -16,6 +16,9 @@ from matplotlib import pyplot as plt
 import plotly.graph_objs as go
 import plotly.offline as py
 
+import numpy as np
+import csv
+
 plt.style.use('fivethirtyeight')
 
 from torch.utils.data.sampler import SubsetRandomSampler
@@ -31,7 +34,6 @@ def to_img(x):
     x = x.view(x.size(0), 1, 28, 28)
     return x
 
-
 num_epochs = 351
 batch_size = 128
 learning_rate = 1e-3
@@ -43,18 +45,14 @@ img_transform = transforms.Compose([
 
 
 transform_train = transforms.Compose([transforms.ToTensor(),
-transforms.Normalize((0.5,), (0.5,))
+transforms.Normalize((0.5,), (0.5,))   #image = (image - mean) / std    makes it between -1 and 1
 ])
 
 #trainset= MNIST(root='./data', download=True, transform=transform_train)
 
-train_dataset = MNIST(
-    root='./data',
-    download=True, transform=transform_train,)
+train_dataset = MNIST(root='./data',download=True, transform=transform_train)
 
-valid_dataset = MNIST(
-    root='./data', train=False,
-    download=True, transform=transform_train,)
+valid_dataset = MNIST(root='./data', train=False,download=True, transform=transform_train)
 
 print(len(train_dataset))
 print(len(valid_dataset))
@@ -69,144 +67,50 @@ print(len(valid_dataset))
 #dataset = MNIST('./data', transform=img_transform, download=True)
 
 
-train_loader = DataLoader(
-    train_dataset, batch_size=batch_size, shuffle=True)        #Data/batchsize
-valid_loader = DataLoader(
-    valid_dataset, batch_size=batch_size, shuffle=True)        #Data/bathsize
+train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)        #Data/batchsize
+valid_loader = DataLoader(valid_dataset, batch_size=batch_size, shuffle=True)        #Data/bathsize
 
 
 print(len(train_loader))
 print(len(valid_loader))
 #dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
 
-'''
-class autoencoder(nn.Module):
-    def __init__(self):
-        super(autoencoder, self).__init__()
-        self.encoder = nn.Sequential(
-            nn.Linear(28 * 28, 128),
-            nn.ReLU(True),
-            nn.Linear(128, 64),
-            nn.ReLU(True), nn.Linear(64, 12), nn.ReLU(True), nn.Linear(12, 3))
-        self.decoder = nn.Sequential(
-            nn.Linear(3, 12),
-            nn.ReLU(True),
-            nn.Linear(12, 64),
-            nn.ReLU(True),
-            nn.Linear(64, 128),
-            nn.ReLU(True), nn.Linear(128, 28 * 28), nn.Tanh())
-    def forward(self, x):
-        x = self.encoder(x)
-        x = self.decoder(x)
-        return x
-'''
-
-
 class AutoEncoder(nn.Module):
     def __init__(self):
         super(AutoEncoder, self).__init__()
-        # MNIST image is 1x28x28 (CxHxW)
-        # Pytorch expects input data as BxCxHxW
-        # B: Batch size
-        # C: number of channels gray scale images have 1 channel
-        # W: width of the image
-        # H: height of the image
-
-        # use 32 3x3 filters with padding
-        # padding is set to 1 so that image W,H is not changed after convolution
-        # stride is 2 so filters will move 2 pixels for next calculation
-        # W after conv2d  [(W - Kernelw + 2*padding)/stride] + 1
-        # after convolution we'll have Bx32 14x14 feature maps
-        self.conv1 = nn.Conv2d(in_channels=1,
-                               out_channels=32,
-                               kernel_size=3,
-                               stride=2,
-                               padding=1)
-
-        nn.MaxPool2d(2, stride=2),  # b, 16, 5, 5
-
-        #self.bn1=nn.BatchNorm1d(32*14*14)      #makes it worse
-
+        self.conv1 = nn.Conv2d(in_channels=1,out_channels=32,
+                               kernel_size=3,stride=2,padding=1)
+        self.bn1=nn.BatchNorm2d(32)
         # after convolution we'll have Bx64 7x7 feature maps
-        self.conv2 = nn.Conv2d(in_channels=32,
-                               out_channels=64,
-                               kernel_size=3,
-                               stride=2,
-                               padding=1
+        self.conv2 = nn.Conv2d(in_channels=32,out_channels=64,
+                               kernel_size=3,stride=2,padding=1
                                )
-
-        nn.MaxPool2d(2, stride=2),  # b, 16, 5, 5
-
-        #self.bn2=nn.BatchNorm1d(64*7*7)
-
-        '''
-        # after convolution we'll have Bx128 5x5 feature maps
-        self.conv3 = nn.Conv2d(in_channels=64,
-                               out_channels=98,
-                               kernel_size=3,
-                               stride=2,
-                               padding=1
-                               )
-        '''
-        self.fc11 = nn.Linear(in_features=64*7*7,
-                              out_features=196)
-
-        #nn.MaxPool2d(2, stride=2) makes it worse
-        #self.bn2 = nn.BatchNorm1d(98)
-
+        self.bn2=nn.BatchNorm2d(64)
         # first fully connected layer from 64*7*7=3136 input features to 16 hidden units
-        self.fc1 = nn.Linear(in_features=196,
-                             out_features=16)
+        self.fc11 = nn.Linear(in_features=64*7*7,out_features=196)
 
-        #self.bn3=nn.BatchNorm1d(16)
+        self.fc1 = nn.Linear(in_features=196,out_features=16)
 
-        self.fc2 = nn.Linear(in_features=16,
-                             out_features=196)
+        self.fc2 = nn.Linear(in_features=16,out_features=196)
 
-        self.fc22 = nn.Linear(in_features=196,
-                              out_features=64*7*7)
-
-        '''
-        self.conv_t11 = nn.ConvTranspose2d(in_channels=98,
-                                           out_channels=64,
-                                           kernel_size=3,
-                                           stride=2,
-                                           padding=1,
-                                           output_padding=1)
-        '''
-
+        self.fc22 = nn.Linear(in_features=196,out_features=64*7*7)
         # 32 14x14
-        self.conv_t1 = nn.ConvTranspose2d(in_channels=64,
-                                          out_channels=32,
-                                          kernel_size=3,
-                                          stride=2,
-                                          padding=1,
-                                          output_padding=1)
-
+        self.conv_t1 = nn.ConvTranspose2d(in_channels=64,out_channels=32,kernel_size=3,
+                                          stride=2,padding=1,output_padding=1)
         # 1 28x28
-        self.conv_t2 = nn.ConvTranspose2d(in_channels=32,
-                                          out_channels=1,
-                                          kernel_size=3,
-                                          stride=2,
-                                          padding=1,
-                                          output_padding=1)
+        self.conv_t2 = nn.ConvTranspose2d(in_channels=32,out_channels=1,kernel_size=3,
+                                          stride=2,padding=1,output_padding=1)
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        #nn.Dropout(0.5) makes it worse
-        x = F.relu(self.conv2(x))
-        #nn.Dropout(0.5)    makes it worse
+        x = torch.tanh(self.bn1(self.conv1(x)))
+        x = torch.tanh(self.bn2(self.conv2(x)))
         x = torch.flatten(x, 1)  # flatten feature maps, Bx (CxHxW)
-        x = F.relu(self.fc11(x))
-        x = F.relu(self.fc1(x))
-        #nn.Dropout(0.5)
-        x = F.relu(self.fc2(x))
-        x = F.relu(self.fc22(x))
-        #nn.Dropout(0.5)
+        x = torch.tanh(self.fc11(x))
+        x = torch.tanh(self.fc1(x))
+        x = torch.tanh(self.fc2(x))
+        x = torch.tanh(self.fc22(x))
         x = x.view(-1, 64, 7, 7)  # reshape back to feature map format
-        x#=F.relu(self.conv_t11(x))
-        x = F.relu(self.conv_t1(x))
-        #nn.Dropout(0.5)
+        x = torch.tanh(self.conv_t1(x))
         x = torch.tanh(self.conv_t2(x))
         return x
 
@@ -221,7 +125,7 @@ def train():
     total_loss = torch.zeros(1).to(device)
     for img, _ in train_loader:  # next batch
         img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
-        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.2)
+        gaussian_img = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
         gaussian_img = torch.from_numpy(gaussian_img).to(device)
         #saltpepper_img = skimage.util.random_noise(img.cpu(), mode="s&p", amount=0.45)
         #saltpepper_img = torch.from_numpy(saltpepper_img).to(device)
@@ -233,24 +137,24 @@ def train():
         output = model(gaussian_img.float()).to(device)  # feed forward
         loss = criterion(output, img)    # calculate loss
         output_ndarr = (output.cpu().detach()).numpy()
-        psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr)
+
+        psnr = peak_signal_noise_ratio(img_ndarr,output_ndarr,data_range=14)
 
         loss.backward()  # calculate new gradients
         optimizer.step()  # update weights
         total_loss += loss.item()  # accumulate loss
-
 
     return gaussian_img, img, output, total_loss, psnr
 
 
 def valid():
     with torch.no_grad():
-        model.eval().cuda()  #.to(device) in laptop
+        model.eval().cuda()  #.to(device)
         valid_loss = torch.zeros(1).to(device)
         for img, _ in valid_loader:
             img = Variable(img).to(device)  # convert to Variable to calculate gradient and move to gpu
 
-            gaussian_image = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.2)
+            gaussian_image = skimage.util.random_noise(img.cpu(), mode="gaussian", var=1.6)
             gaussian_image = torch.from_numpy(gaussian_image).to(device)
             #saltpepper_img = skimage.util.random_noise(img.cpu(), mode="s&p", amount=0.45)
             #saltpepper_img = torch.from_numpy(saltpepper_img).to(device)
@@ -259,9 +163,10 @@ def valid():
             valid_loss += criterion(output, img)  # calculate loss
             img_ndarr = (img.cpu()).numpy()
             output_ndarr = (output.cpu().detach()).numpy()
-            psnr = peak_signal_noise_ratio(img_ndarr, output_ndarr)
+            psnr = peak_signal_noise_ratio(img_ndarr, output_ndarr,data_range=14)
 
         return gaussian_image, img, output, valid_loss, psnr
+
 
 epocharray = []
 trainlossarray = []
@@ -287,13 +192,50 @@ for epoch in range(num_epochs):
     if epoch % 50 == 0:
         pic_org = (img)
         pic_noised = (noised_img)
-        pic_pred = to_img(output)
+        pic_pred = (output)
+
+        '''
+        img = (img.cpu().detach()).numpy()
+        noised_img = (noised_img.cpu().detach()).numpy()
+        output = (output.cpu().detach()).numpy()
+
+        pixval1 = list(img)     #0 and 1
+        pixval2 = list(noised_img)  #0 and 1
+        pixval3 = (output).tolist()  #-0.5 and 1
+
+        print(img.shape)
+        print(noised_img.shape)
+        print(output.shape)
+
+        
+        with open("try1.txt", "w") as txt_file:
+            for line in str(pixval1):
+                txt_file.write(" ".join(line))
+        with open("try2.txt", "w") as txt_file:
+            for line in str(pixval2):
+                txt_file.write(" ".join(line))
+        with open("try3.txt", "w") as txt_file:
+            for line in str(pixval3):
+             txt_file.write(" ".join(line))
+
+        rows = []
+        with open('try3.txt', mode='r') as infile:
+            reader = csv.reader(infile, delimiter=",")
+            for row in reader:  # each row is a list
+                rows.append(row)
+
+        # lambda function to filter min considering the second column
+        minimus = min(rows, key=lambda x: (x[:]))
+
+        # done
+        print(minimus)
+'''
         save_image(pic_org, './denoise_image_org__{}.png'.format(epoch))
         save_image(pic_noised, './denoise_image_noised__{}.png'.format(epoch))
         save_image(pic_pred, './denoise_image_pred__{}.png'.format(epoch))
         valid_org = (valid_img)
         valid_noisy = (valid_noised_img)
-        valid_pic = to_img(valid_output.cpu().data)
+        valid_pic = (valid_output.cpu().data)
         save_image(valid_pic, './valid_denoise_image_pred{}.png'.format((epoch)))
         save_image(valid_noisy, './valid_denoise_image_noise_{}.png'.format((epoch)))
         save_image(valid_org, './valid_denoise_image_org_{}.png'.format((epoch)))
